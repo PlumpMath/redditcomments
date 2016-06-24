@@ -26,7 +26,7 @@
    {:user-name nil
     :error-message nil
     :mode :init
-    :comments []}))
+    :comments {}}))
 
 ;; util ------------------------------------------------------------------------
 
@@ -53,8 +53,9 @@
              (if (and
                   (.isSuccess xhr)
                   (= 200 (.getStatus xhr)))
-               (let [data (js->clj (.getResponseJson xhr))]
-                 (dispatch [:update-comments data]))
+               (let [raw-data (.getResponseJson xhr)
+                     data (js->clj raw-data :keywordize-keys true)]
+                 (dispatch [:update-comments (map :data (-> data :data :children))]))
                (dispatch [:error "api error"]))))
          ))
 
@@ -65,9 +66,9 @@
 (register-handler
  :update-comments
  (fn [db [_ data]]
-   (println data)
-   db
-   ))
+   (let [current (:comments db)
+         new-grouped (group-by :subreddit data) ]
+     (assoc db :comments (merge-with conj current new-grouped)))))
 
 
 (register-handler
@@ -83,7 +84,7 @@
  (fn [db [_ user-name]]
    (let [new-db (assoc db
                        :mode :searching
-                       :comments []
+                       :comments {}
                        :user-name user-name
                        :error-message nil)]
      (comment-search user-name 0)
@@ -91,13 +92,26 @@
 
 ;; subs ------------------------------------------------------------------------
 
+(register-sub
+ :user-name
+ (fn
+   [db _]
+   (reaction (:user-name @db))))
+
+
+(register-sub
+ :comments
+ (fn
+   [db _]
+   (reaction (:comments @db))))
 
 ;; components ------------------------------------------------------------------
 
 
-(defn search-component []
-  (let [current-input (r/atom "a")]
-    (fn []
+(defn search-component [user]
+  (let [current-input (r/atom user)]
+    (println user)
+    (fn [user]
       [:form {:on-submit
               (fn [ev]
                 (.preventDefault ev)
@@ -108,17 +122,29 @@
                 :value @current-input}]
        [:button "search"]])))
 
-(defn application []
-  [:div.pure-g
-   [search-component]
+(defn comments-component [comments]
+  (println comments)
+  (into [:div]
+        (for [[subred cs] comments]
+          [:div
+           [:h2 subred]
+           (into [:ul]
+                 (for [c cs]
+                   [:li (:body c)]))])))
 
-   [debug-db]])
+(defn application []
+  (let [user (subscribe [:user-name])
+        comments (subscribe [:comments])]
+    (fn []
+      [:div.pure-g
+       [search-component @user]
+       [comments-component @comments]
+       [debug-db]])))
 
 (defonce init
   (dispatch-sync [:init-db]))
 
 (defn mount-root []
-
   (r/render [#'application]
                   (js/document.getElementById "app")))
 
